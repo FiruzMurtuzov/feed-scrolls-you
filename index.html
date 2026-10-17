@@ -1,0 +1,1528 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>The Feed Scrolls You</title>
+<!--
+  The Feed Scrolls You
+  Run locally (the camera needs localhost or https):
+    python3 -m http.server 8000   then open   http://localhost:8000
+  Press D in-game for the debug view (webcam + landmarks + live values for tuning CONFIG).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #050508;
+    --line: rgba(255, 255, 255, .08);
+    --text: #f6f6fb;
+    --muted: #9b9bb3;
+    --pink: #ff2d75;
+    --pink-2: #ff7aa8;
+    --violet: #8b5cf6;
+    --cyan: #2ee6d6;
+    --lime: #b6f35a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(1100px 760px at 12% -12%, rgba(139, 92, 246, .20), transparent 60%),
+      radial-gradient(900px 700px at 112% 112%, rgba(255, 45, 117, .16), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+
+  /* ---------- phone card ---------- */
+  .phone {
+    position: relative;
+    width: min(calc((100vh - 48px) * 9 / 16), calc(100vw - 32px), 520px);
+    width: min(calc((100dvh - 48px) * 9 / 16), calc(100vw - 32px), 520px);
+    aspect-ratio: 9 / 16;
+    container-type: size;
+    border-radius: 36px;
+    background: linear-gradient(180deg, #10101a 0%, #08080d 100%);
+    border: 1px solid var(--line);
+    box-shadow:
+      0 0 0 7px #0c0c12,
+      0 0 0 8px rgba(255, 255, 255, .06),
+      0 40px 120px rgba(0, 0, 0, .75),
+      0 0 90px rgba(139, 92, 246, .14);
+    overflow: hidden;
+  }
+  .screen {
+    position: absolute; inset: 0;
+    display: grid;
+    grid-template-rows: auto 24cqh auto auto minmax(0, 1fr);
+    gap: 2.2cqw;
+    padding: 4cqw 3.6cqw 3.6cqw;
+    font-size: 3.6cqw;
+  }
+  .screen > * { min-height: 0; }
+
+  /* top bar */
+  .progress { height: 0.8cqw; min-height: 3px; border-radius: 99px; background: rgba(255, 255, 255, .12); overflow: hidden; }
+  .progress i { display: block; height: 100%; background: #fff; transform-origin: left; transform: scaleX(0); }
+  .toprow { display: flex; align-items: center; gap: 2.4cqw; margin-top: 2.4cqw; font-weight: 700; font-size: 3.1cqw; }
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 1.4cqw;
+    background: var(--pink); padding: .9cqw 2.4cqw; border-radius: 1.6cqw;
+    letter-spacing: .08em; font-weight: 900; font-size: 2.8cqw;
+  }
+  .live-pill .dot { width: 1.6cqw; height: 1.6cqw; border-radius: 50%; background: #fff; animation: blinkdot 1.2s infinite; }
+  @keyframes blinkdot { 50% { opacity: .25; } }
+  .timer { font-variant-numeric: tabular-nums; font-weight: 800; }
+  .viewers { margin-left: auto; display: inline-flex; align-items: center; gap: 1.2cqw; color: var(--muted); font-weight: 600; }
+  .viewers svg { width: 3.6cqw; height: 3.6cqw; }
+
+  /* the algorithm */
+  .algo { position: relative; }
+  .algo svg { width: 100%; height: 100%; overflow: visible; display: block; }
+
+  /* speech bubble */
+  .bubble {
+    position: relative;
+    background: #f7f6ff; color: #120d22;
+    border-radius: 5cqw; padding: 3cqw 4cqw 3.4cqw;
+    box-shadow: 0 1.6cqw 6cqw rgba(0, 0, 0, .45);
+    overflow: visible;
+  }
+  .bubble::before {
+    content: ""; position: absolute; top: -2.2cqw; left: 30%;
+    width: 5cqw; height: 5cqw; background: #f7f6ff; border-radius: 1cqw;
+    transform: rotate(45deg);
+  }
+  .bubble.pop { animation: pop .5s cubic-bezier(.2, 1.6, .4, 1); }
+  @keyframes pop { 0% { transform: scale(.9); } 100% { transform: scale(1); } }
+  .bubble-label { position: relative; font-size: 2.4cqw; font-weight: 800; letter-spacing: .14em; color: #8a7fb0; text-transform: uppercase; }
+  .req { position: relative; font-size: 6.6cqw; font-weight: 900; letter-spacing: -.02em; line-height: 1.05; margin-top: .8cqw; }
+  .bubble.snark .req { color: var(--pink); }
+  .bubble.love .req { background: linear-gradient(90deg, #ff2d75, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { position: relative; font-size: 3.3cqw; font-weight: 600; color: #5d557a; margin-top: 1cqw; min-height: 1.3em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub.flash { animation: subflash .35s ease; }
+  @keyframes subflash { from { opacity: 0; transform: translateY(1cqw); } }
+  .reqbar { position: absolute; left: 4cqw; right: 4cqw; bottom: 1.4cqw; height: .7cqw; border-radius: 99px; background: rgba(18, 13, 34, .08); overflow: hidden; }
+  .reqbar i { display: block; height: 100%; background: #120d22; opacity: .35; transform-origin: left; transform: scaleX(0); }
+
+  /* HUD */
+  .hud { display: flex; align-items: flex-end; gap: 4cqw; }
+  .meter-wrap { flex: 1; }
+  .hud-label { display: flex; align-items: center; gap: 2cqw; font-size: 2.5cqw; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 1.4cqw; }
+  .drain {
+    color: #fff; background: #ff4d4d; padding: .3cqw 1.6cqw; border-radius: 99px; letter-spacing: .04em;
+    opacity: 0; transform: scale(.7); transition: opacity .2s, transform .25s cubic-bezier(.3, 1.6, .5, 1);
+  }
+  .drain.show { opacity: 1; transform: scale(1); }
+  .meter { --hue: 130; position: relative; height: 3.4cqw; border-radius: 99px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+  .meter i {
+    position: absolute; inset: 0; border-radius: inherit; transform-origin: left; transform: scaleX(1);
+    background: linear-gradient(90deg, hsl(var(--hue) 90% 52%), hsl(calc(var(--hue) + 35) 95% 62%));
+    box-shadow: 0 0 3cqw hsl(var(--hue) 90% 55% / .6);
+  }
+  .meter.fast i::after {
+    content: ""; position: absolute; inset: 0;
+    background: repeating-linear-gradient(-45deg, rgba(0, 0, 0, .28) 0 1.4cqw, transparent 1.4cqw 2.8cqw);
+    background-size: 4cqw 4cqw; animation: stripes .4s linear infinite;
+  }
+  @keyframes stripes { to { background-position: 4cqw 0; } }
+  .meter.low { animation: lowpulse .6s ease-in-out infinite; }
+  @keyframes lowpulse { 50% { box-shadow: 0 0 0 .8cqw rgba(255, 77, 77, .35); } }
+  .score { text-align: right; }
+  .score .hud-label { justify-content: flex-end; margin-bottom: .4cqw; }
+  .score-val { font-size: 6.4cqw; font-weight: 900; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+
+  /* the post (you) */
+  .feed { position: relative; border-radius: 5.4cqw; overflow: hidden; background: #000; }
+  .post { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; will-change: transform; }
+  .post::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 0 rgba(255, 45, 117, 0); transition: box-shadow .3s; }
+  .post.hot::after { box-shadow: inset 0 0 0 .7cqw rgba(255, 45, 117, .55), inset 0 0 8cqw rgba(255, 45, 117, .35); }
+  #avatar { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .post-top { position: absolute; top: 3cqw; left: 3cqw; right: 3cqw; display: flex; align-items: center; gap: 2cqw; font-weight: 700; font-size: 3.1cqw; }
+  .chip { display: inline-flex; align-items: center; gap: 1.6cqw; background: rgba(0, 0, 0, .35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); padding: .8cqw 2.4cqw .8cqw .8cqw; border-radius: 99px; }
+  .pfp { width: 5.4cqw; height: 5.4cqw; border-radius: 50%; display: grid; place-items: center; font-size: 2.8cqw; font-weight: 900; background: linear-gradient(135deg, var(--pink), var(--violet)); }
+  .tag { margin-left: auto; font-size: 2.6cqw; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; opacity: .7; }
+  .rail { position: absolute; right: 2.6cqw; bottom: 15cqw; display: flex; flex-direction: column; gap: 3.4cqw; align-items: center; }
+  .rail-item { display: flex; flex-direction: column; align-items: center; gap: .6cqw; font-size: 2.6cqw; font-weight: 800; text-shadow: 0 1px 4px rgba(0, 0, 0, .6); }
+  .rail-item svg { width: 7.4cqw; height: 7.4cqw; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .5)); }
+  .ring {
+    --p: 0;
+    width: 10.4cqw; height: 10.4cqw; border-radius: 50%; display: grid; place-items: center;
+    background: conic-gradient(var(--pink) calc(var(--p) * 360deg), rgba(255, 255, 255, .16) 0);
+    -webkit-mask: radial-gradient(circle, transparent 58%, #000 60%); mask: radial-gradient(circle, transparent 58%, #000 60%);
+    position: absolute;
+  }
+  .like-wrap { position: relative; width: 10.4cqw; height: 10.4cqw; display: grid; place-items: center; }
+  .like-wrap svg { width: 6.4cqw; height: 6.4cqw; fill: #fff; transition: fill .2s; }
+  .like-wrap.liked svg { fill: var(--pink); animation: likepulse .5s cubic-bezier(.2, 1.8, .4, 1); }
+  @keyframes likepulse { 0% { transform: scale(.6); } }
+  .caption { position: absolute; left: 3.4cqw; right: 16cqw; bottom: 3.4cqw; font-size: 3.1cqw; line-height: 1.35; text-shadow: 0 1px 4px rgba(0, 0, 0, .6); }
+  .caption b { font-weight: 800; }
+  .sound { margin-top: .8cqw; font-size: 2.7cqw; opacity: .75; font-weight: 600; }
+
+  .nosignal {
+    position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 8cqw;
+    opacity: 0; transition: opacity .3s; pointer-events: none;
+  }
+  .nosignal.show { opacity: 1; }
+  .nosignal .ghost-body { width: 26cqw; height: 26cqw; margin: 0 auto 3cqw; border: .7cqw dashed rgba(255, 255, 255, .35); border-radius: 50% 50% 18% 18%; animation: breathe2 2s ease-in-out infinite; }
+  @keyframes breathe2 { 50% { opacity: .4; transform: scale(.96); } }
+  .nosignal b { display: block; font-size: 4.6cqw; font-weight: 900; }
+  .nosignal span { font-size: 3cqw; color: rgba(255, 255, 255, .7); }
+
+  .stamp {
+    position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) rotate(-9deg) scale(1.8);
+    font-size: 12cqw; font-weight: 900; letter-spacing: -.03em; text-transform: uppercase; white-space: nowrap;
+    color: var(--pink); border: 1.2cqw solid var(--pink); border-radius: 3cqw; padding: 0 3.4cqw;
+    background: rgba(10, 6, 16, .55); opacity: 0; pointer-events: none;
+  }
+  .stamp.show { animation: stamp .35s cubic-bezier(.2, 1.4, .4, 1) forwards; }
+  @keyframes stamp { to { opacity: 1; transform: translate(-50%, -50%) rotate(-9deg) scale(1); } }
+
+  .bigheart { position: absolute; left: 50%; top: 42%; width: 40cqw; height: 40cqw; transform: translate(-50%, -50%) scale(0); opacity: 0; pointer-events: none; }
+  .bigheart svg { width: 100%; height: 100%; fill: var(--pink); filter: drop-shadow(0 0 6cqw rgba(255, 45, 117, .8)); }
+  .bigheart.pop { animation: bigheart 1s cubic-bezier(.2, 1.5, .4, 1) forwards; }
+  @keyframes bigheart {
+    0% { transform: translate(-50%, -50%) scale(0) rotate(-14deg); opacity: 0; }
+    25% { transform: translate(-50%, -50%) scale(1.15) rotate(6deg); opacity: 1; }
+    45% { transform: translate(-50%, -50%) scale(.95) rotate(-3deg); opacity: 1; }
+    80% { transform: translate(-50%, -50%) scale(1) rotate(0); opacity: 1; }
+    100% { transform: translate(-50%, -70%) scale(.6); opacity: 0; }
+  }
+  .hearts { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .fh { position: absolute; top: 46%; width: 8cqw; height: 8cqw; animation: fh 1.3s cubic-bezier(.15, .7, .3, 1) forwards; opacity: 0; }
+  .fh svg { width: 100%; height: 100%; fill: var(--c, var(--pink)); }
+  @keyframes fh {
+    0% { opacity: 0; transform: translate(0, 0) scale(.3) rotate(0); }
+    15% { opacity: 1; }
+    100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(var(--s)) rotate(var(--r)); }
+  }
+
+  /* ---------- overlays ---------- */
+  .overlay {
+    position: absolute; inset: 0; z-index: 5;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 8cqw 7cqw; gap: 3.6cqw;
+    background: radial-gradient(120% 70% at 50% 0%, rgba(139, 92, 246, .28), transparent 60%), rgba(6, 6, 11, .82);
+    backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    font-size: 3.6cqw;
+    transition: opacity .45s ease, transform .45s ease;
+  }
+  .overlay.hidden { opacity: 0; pointer-events: none; transform: scale(1.04); }
+  .brand { display: flex; align-items: center; gap: 2cqw; font-weight: 800; font-size: 3.2cqw; letter-spacing: .02em; color: var(--muted); }
+  .logo { width: 6cqw; height: 6cqw; border-radius: 1.8cqw; display: grid; place-items: center; background: linear-gradient(135deg, var(--pink), var(--violet)); color: #fff; font-size: 2.8cqw; }
+  h1 { font-size: 12.4cqw; line-height: .95; font-weight: 900; letter-spacing: -.045em; }
+  .grad { background: linear-gradient(90deg, #ff2d75, #b06cff 60%, #2ee6d6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { color: #c9c7da; font-size: 3.7cqw; line-height: 1.45; font-weight: 500; }
+  .rules { list-style: none; display: grid; gap: 1.6cqw; font-size: 3.3cqw; color: var(--muted); font-weight: 600; }
+  .rules li { display: flex; gap: 2cqw; align-items: center; }
+  .rules li::before { content: ""; width: 1.6cqw; height: 1.6cqw; border-radius: 50%; background: var(--pink); flex: none; }
+  .rules b { color: var(--text); }
+  .cta {
+    margin-top: 1.6cqw; border: 0; cursor: pointer;
+    font-size: 5cqw; font-weight: 900; letter-spacing: -.01em;
+    padding: 4.2cqw 0; border-radius: 99px;
+    background: linear-gradient(90deg, #ff2d75, #ff4fa0 50%, #a855f7);
+    box-shadow: 0 2cqw 8cqw rgba(255, 45, 117, .45), inset 0 1px 0 rgba(255, 255, 255, .35);
+    transition: transform .15s, box-shadow .2s, opacity .2s;
+    display: flex; align-items: center; justify-content: center; gap: 2.4cqw;
+  }
+  .cta:hover { transform: translateY(-2px); box-shadow: 0 3cqw 10cqw rgba(255, 45, 117, .6), inset 0 1px 0 rgba(255, 255, 255, .35); }
+  .cta:active { transform: translateY(1px) scale(.99); }
+  .cta:disabled { opacity: .6; cursor: progress; transform: none; }
+  .cta .rec { width: 3cqw; height: 3cqw; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1cqw rgba(255, 255, 255, .25); }
+  .cta:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+  .status { text-align: center; font-size: 3cqw; color: var(--muted); font-weight: 600; min-height: 1.4em; }
+  .status.ready { color: var(--lime); }
+  .fine { text-align: center; font-size: 2.7cqw; color: #6f6d86; }
+  .error {
+    background: rgba(255, 77, 77, .1); border: 1px solid rgba(255, 77, 77, .45);
+    border-radius: 4cqw; padding: 3.6cqw 4cqw; display: grid; gap: 1.6cqw;
+  }
+  .error b { font-size: 4cqw; font-weight: 900; color: #ff8a8a; }
+  .error p { font-size: 3.2cqw; line-height: 1.45; color: #e7d6db; }
+  .error code { background: rgba(255, 255, 255, .1); padding: .2em .45em; border-radius: .4em; font-size: .95em; }
+  .error.hidden { display: none; }
+  .ghost { justify-self: start; background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .2); border-radius: 99px; padding: 1.6cqw 4cqw; font-weight: 800; font-size: 3.2cqw; cursor: pointer; }
+  .ghost:hover { background: rgba(255, 255, 255, .18); }
+
+  #countdown { align-items: center; text-align: center; background: rgba(6, 6, 11, .55); }
+  .count { font-size: 38cqw; font-weight: 900; line-height: 1; letter-spacing: -.06em; }
+  .count.tick { animation: tick .9s cubic-bezier(.2, 1.4, .4, 1); }
+  @keyframes tick { 0% { transform: scale(1.6); opacity: 0; } 30% { opacity: 1; } 100% { transform: scale(1); } }
+  .count-sub { font-size: 3.6cqw; font-weight: 700; color: #d8d6e8; max-width: 70cqw; }
+  .count-sub.ok { color: var(--lime); }
+
+  #endScreen { justify-content: flex-start; overflow-y: auto; gap: 3.4cqw; padding-top: 10cqw; }
+  .kicker { font-size: 3cqw; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: var(--pink-2); }
+  .end-title { font-size: 8.6cqw; font-weight: 900; letter-spacing: -.04em; line-height: 1; margin-top: -1cqw; }
+  .big-stat { background: linear-gradient(135deg, rgba(255, 45, 117, .22), rgba(139, 92, 246, .22)); border: 1px solid rgba(255, 255, 255, .1); border-radius: 5cqw; padding: 4.4cqw 5cqw; }
+  .big-stat b { display: block; font-size: 15cqw; font-weight: 900; letter-spacing: -.05em; line-height: .95; font-variant-numeric: tabular-nums; }
+  .big-stat small { font-size: 3.1cqw; color: #d8d6e8; font-weight: 600; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.6cqw; }
+  .stat-grid > div { background: rgba(255, 255, 255, .05); border: 1px solid var(--line); border-radius: 4cqw; padding: 3.4cqw 4cqw; }
+  .stat-grid b { display: block; font-size: 9cqw; font-weight: 900; letter-spacing: -.04em; line-height: 1; }
+  .stat-grid span { font-size: 2.9cqw; color: var(--muted); font-weight: 600; }
+  .stat-grid .bad b { color: #ff7a7a; }
+  .stat-grid .good b { color: var(--pink-2); }
+  .lbl { display: block; font-size: 2.6cqw; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 1cqw; }
+  .best b { font-size: 5.4cqw; font-weight: 900; letter-spacing: -.02em; }
+  .best small { display: block; font-size: 3cqw; color: var(--muted); margin-top: .6cqw; font-weight: 600; }
+  .verdict { border-top: 1px solid var(--line); padding-top: 3.4cqw; }
+  .verdict b { display: block; font-size: 7.4cqw; font-weight: 900; letter-spacing: -.035em; line-height: 1.05; }
+  .verdict small { display: block; margin-top: 1.4cqw; font-size: 3cqw; color: var(--muted); font-weight: 600; }
+
+  /* ---------- the Algorithm (SVG) ---------- */
+  #algo .head-pose { transform-box: fill-box; transform-origin: 50% 100%; transition: transform .65s cubic-bezier(.34, 1.4, .5, 1); }
+  #algo[data-mood="bored"] .head-pose { transform: rotate(-16deg) translate(-4px, 4px); }
+  #algo[data-mood="curious"] .head-pose { transform: rotate(-3deg) translate(8px, -8px); }
+  #algo[data-mood="delighted"] .head-pose { transform: rotate(-7deg) translate(5px, -10px); }
+  #algo[data-mood="disgusted"] .head-pose { transform: rotate(-27deg) translate(-14px, 3px); }
+  #algo .head-anim { transform-box: fill-box; transform-origin: 50% 100%; animation: breathe 4.5s ease-in-out infinite; }
+  #algo[data-mood="delighted"] .head-anim { animation: bounce .42s ease-in-out 4; }
+  #algo[data-mood="disgusted"] .head-anim { animation: shudder .5s ease-in-out 1; }
+  @keyframes breathe { 50% { transform: translateY(2px) scale(1.012); } }
+  @keyframes bounce { 50% { transform: translateY(-7px) scale(1.03); } }
+  @keyframes shudder { 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+  #algo .body { transform-box: fill-box; transform-origin: 50% 100%; animation: breathe 4.5s ease-in-out infinite; }
+
+  #algo .blink { transform-box: fill-box; transform-origin: center; animation: blink 5.2s infinite; }
+  @keyframes blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.08); } }
+  #algo .lid { transform-box: fill-box; transform-origin: 50% 0%; transition: transform .35s ease; transform: scaleY(.58); }
+  #algo[data-mood="curious"] .lid { transform: scaleY(.04); }
+  #algo[data-mood="disgusted"] .lid-l { transform: rotate(14deg) scaleY(.6); }
+  #algo[data-mood="disgusted"] .lid-r { transform: rotate(-14deg) scaleY(.6); }
+  #algo .pupil-s { transform-box: fill-box; transform-origin: center; transition: transform .3s; }
+  #algo[data-mood="curious"] .pupil-s { transform: scale(1.18); }
+  #algo .eyes-open, #algo .eyes-happy { transition: opacity .18s; }
+  #algo .eyes-happy { opacity: 0; }
+  #algo[data-mood="delighted"] .eyes-open { opacity: 0; }
+  #algo[data-mood="delighted"] .eyes-happy { opacity: 1; }
+
+  #algo .brow { transform-box: fill-box; transform-origin: center; transition: transform .35s cubic-bezier(.3, 1.5, .5, 1); }
+  #algo[data-mood="bored"] .brow-l { transform: translateY(5px); }
+  #algo[data-mood="bored"] .brow-r { transform: translateY(6px) rotate(-3deg); }
+  #algo[data-mood="curious"] .brow-r { transform: translateY(-8px) rotate(-12deg); }
+  #algo[data-mood="delighted"] .brow { transform: translateY(-7px); }
+  #algo[data-mood="disgusted"] .brow-l { transform: translateY(5px) rotate(17deg); }
+  #algo[data-mood="disgusted"] .brow-r { transform: translateY(7px) rotate(-17deg); }
+
+  #algo .m { opacity: 0; transform-box: fill-box; transform-origin: center; transform: scale(.5); transition: opacity .18s, transform .35s cubic-bezier(.3, 1.6, .5, 1); }
+  #algo[data-mood="bored"] .m-bored,
+  #algo[data-mood="curious"] .m-curious,
+  #algo[data-mood="delighted"] .m-delighted,
+  #algo[data-mood="disgusted"] .m-disgusted { opacity: 1; transform: none; }
+  #algo .gum { transform-box: fill-box; transform-origin: 0% 50%; animation: gum 5.5s ease-in-out infinite; opacity: 0; transition: opacity .2s; }
+  #algo[data-mood="bored"] .gum { opacity: .95; }
+  @keyframes gum { 0%, 40% { transform: scale(0); } 76% { transform: scale(1); } 80% { transform: scale(1.12); } 81%, 100% { transform: scale(0); } }
+  #algo .blush { opacity: 0; transition: opacity .3s; }
+  #algo[data-mood="delighted"] .blush { opacity: 1; }
+  #algo .tint { opacity: 0; transition: opacity .35s; }
+  #algo[data-mood="disgusted"] .tint { opacity: .32; }
+  #algo .led { transition: fill .3s; }
+  #algo[data-mood="curious"] .led { fill: #ffd84d; }
+  #algo[data-mood="delighted"] .led { fill: #ff2d75; }
+  #algo[data-mood="disgusted"] .led { fill: #7dff8a; }
+  #algo .mh { opacity: 0; transform-box: fill-box; transform-origin: center; }
+  #algo[data-mood="delighted"] .mh { animation: mh 1.3s ease-out infinite; }
+  #algo[data-mood="delighted"] .mh2 { animation-delay: .35s; }
+  #algo[data-mood="delighted"] .mh3 { animation-delay: .7s; }
+  @keyframes mh { 0% { opacity: 0; transform: translateY(6px) scale(.5); } 25% { opacity: 1; } 100% { opacity: 0; transform: translateY(-26px) scale(1.1); } }
+
+  #algo .thumb { transform-box: fill-box; transform-origin: 0 0; animation: hover 1.8s ease-in-out infinite; }
+  #algo.impatient .thumb { animation: twitch .45s ease-in-out infinite; }
+  #algo.swiping .thumb { animation: press .7s cubic-bezier(.3, .7, .3, 1) 1; }
+  @keyframes hover { 50% { transform: translate(1px, -5px); } }
+  @keyframes twitch { 50% { transform: translate(2px, 3px); } }
+  @keyframes press { 0% { transform: none; } 30%, 50% { transform: translate(4px, 7px); } 100% { transform: translate(-3px, -16px); } }
+  #algo .next-ring { transform-box: fill-box; transform-origin: center; opacity: .3; }
+  #algo.impatient .next-ring { animation: ringpulse .9s ease-out infinite; }
+  #algo.swiping .next-btn { animation: btnflash .7s ease-out 1; }
+  @keyframes ringpulse { 0% { transform: scale(.85); opacity: .7; } 100% { transform: scale(1.25); opacity: 0; } }
+  @keyframes btnflash { 30% { fill: #ff2d75; } }
+  #algo .next-label { font: 800 10px Inter, system-ui, sans-serif; letter-spacing: 2px; fill: rgba(255, 255, 255, .45); }
+
+  /* ---------- debug ---------- */
+  #video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; left: 0; top: 0; }
+  .debug {
+    position: fixed; left: 16px; bottom: 16px; z-index: 50; width: 280px;
+    background: rgba(8, 8, 14, .92); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #cfd0e6;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .6);
+  }
+  .debug.hidden { display: none; }
+  .debug canvas { display: block; width: 280px; background: #000; }
+  .debug pre { padding: 8px 10px; white-space: pre-wrap; }
+  .debug .hdr { padding: 6px 10px; font-weight: 700; color: #fff; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+  .hint { position: fixed; bottom: 6px; left: 0; right: 0; text-align: center; font-size: 11px; color: #5d5b72; pointer-events: none; }
+  kbd { font: 700 10px ui-monospace, monospace; border: 1px solid #3a3950; border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: #a9a7c0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #algo .head-anim, #algo .body, #algo .thumb, #algo .gum { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<main class="phone" id="phone">
+  <div class="screen">
+    <header class="topbar">
+      <div class="progress"><i id="sessionBar"></i></div>
+      <div class="toprow">
+        <span class="live-pill"><span class="dot"></span>LIVE</span>
+        <span class="timer" id="timer">1:00</span>
+        <span class="viewers">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+          1 viewer
+        </span>
+      </div>
+    </header>
+
+    <section class="algo" aria-hidden="true">
+      <svg id="algo" data-mood="bored" viewBox="0 0 400 230" preserveAspectRatio="xMidYMax meet">
+        <defs>
+          <linearGradient id="gHead" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#c8b5ff" /><stop offset=".55" stop-color="#9168f5" /><stop offset="1" stop-color="#6a2fe0" />
+          </linearGradient>
+          <radialGradient id="gGlow" cx=".72" cy=".95" r=".75">
+            <stop offset="0" stop-color="#5ef2ff" stop-opacity=".5" /><stop offset="1" stop-color="#5ef2ff" stop-opacity="0" />
+          </radialGradient>
+          <linearGradient id="gBag" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#2c2344" /><stop offset="1" stop-color="#141020" />
+          </linearGradient>
+          <linearGradient id="gHoodie" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#ff5592" /><stop offset="1" stop-color="#c41a57" />
+          </linearGradient>
+          <clipPath id="eyeClip"><ellipse cx="0" cy="0" rx="15" ry="17" /></clipPath>
+          <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6" /></filter>
+        </defs>
+
+        <ellipse cx="190" cy="224" rx="172" ry="9" fill="#000" opacity=".5" filter="url(#soft)" />
+        <!-- beanbag -->
+        <path d="M18 222 C 6 160, 60 106, 132 110 C 198 114, 254 150, 270 196 C 278 220, 252 228, 220 228 L 44 228 C 28 228, 20 226, 18 222 Z" fill="url(#gBag)" />
+        <path d="M42 150 C 72 124, 120 116, 162 122" stroke="rgba(255,255,255,.07)" stroke-width="6" fill="none" stroke-linecap="round" />
+
+        <!-- next button -->
+        <g class="next">
+          <circle class="next-ring" cx="352" cy="172" r="27" fill="none" stroke="#ff2d75" stroke-width="2.5" />
+          <circle class="next-btn" cx="352" cy="172" r="22" fill="#1a1a28" stroke="rgba(255,255,255,.2)" stroke-width="1.5" />
+          <path d="M342 177 l10 -10 l10 10" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+          <text class="next-label" x="352" y="214" text-anchor="middle">NEXT</text>
+        </g>
+
+        <!-- body, arm, hand, thumb -->
+        <g class="body">
+          <path d="M104 228 C 108 186, 146 160, 194 160 C 236 160, 262 186, 272 228 Z" fill="url(#gHoodie)" />
+          <path d="M172 170 q 20 13 42 0" stroke="rgba(0,0,0,.2)" stroke-width="4" fill="none" stroke-linecap="round" />
+          <path d="M236 184 C 270 180, 298 162, 316 138" stroke="#e23a74" stroke-width="24" fill="none" stroke-linecap="round" />
+          <circle cx="320" cy="130" r="15" fill="url(#gHead)" />
+          <g class="thumb">
+            <path d="M325 124 L 339 142" stroke="#a684f8" stroke-width="12" stroke-linecap="round" />
+            <path d="M335 137 l 4 5" stroke="#efe8ff" stroke-width="5" stroke-linecap="round" opacity=".75" />
+          </g>
+        </g>
+
+        <!-- head -->
+        <g transform="translate(150 104)">
+          <g class="head-pose"><g class="head-anim">
+            <path d="M-64 4 C -70 -96, 70 -96, 64 4" stroke="#1c1b29" stroke-width="9" fill="none" stroke-linecap="round" />
+            <rect x="-64" y="-58" width="128" height="116" rx="54" fill="url(#gHead)" />
+            <rect x="-64" y="-58" width="128" height="116" rx="54" fill="url(#gGlow)" />
+            <rect class="tint" x="-64" y="-58" width="128" height="116" rx="54" fill="#7dff8a" />
+            <g class="blush">
+              <ellipse cx="-44" cy="16" rx="10" ry="6" fill="#ff5ca8" opacity=".6" />
+              <ellipse cx="46" cy="12" rx="10" ry="6" fill="#ff5ca8" opacity=".6" />
+            </g>
+
+            <g class="eyes-open">
+              <g transform="translate(-27 -4)"><g class="blink">
+                <g clip-path="url(#eyeClip)">
+                  <ellipse rx="15" ry="17" fill="#fff" />
+                  <g class="pupil"><g class="pupil-s"><circle cx="0" cy="3" r="7.5" fill="#160b2e" /><circle cx="2.6" cy=".4" r="2.4" fill="#fff" /></g></g>
+                  <rect class="lid lid-l" x="-26" y="-19" width="52" height="38" fill="#9a78f6" />
+                </g>
+                <ellipse rx="15" ry="17" fill="none" stroke="rgba(30,10,60,.25)" stroke-width="2" />
+              </g></g>
+              <g transform="translate(27 -8)"><g class="blink">
+                <g clip-path="url(#eyeClip)">
+                  <ellipse rx="15" ry="17" fill="#fff" />
+                  <g class="pupil"><g class="pupil-s"><circle cx="0" cy="3" r="7.5" fill="#160b2e" /><circle cx="2.6" cy=".4" r="2.4" fill="#fff" /></g></g>
+                  <rect class="lid lid-r" x="-26" y="-19" width="52" height="38" fill="#8e6af2" />
+                </g>
+                <ellipse rx="15" ry="17" fill="none" stroke="rgba(30,10,60,.25)" stroke-width="2" />
+              </g></g>
+            </g>
+            <path class="eyes-happy" d="M-41 -2 q 14 -17 28 0 M 13 -6 q 14 -17 28 0" stroke="#1a0f33" stroke-width="5" fill="none" stroke-linecap="round" />
+
+            <rect class="brow brow-l" x="-38" y="-34" width="22" height="5.5" rx="2.75" fill="#1a0f33" />
+            <rect class="brow brow-r" x="16" y="-38" width="22" height="5.5" rx="2.75" fill="#1a0f33" />
+
+            <path class="m m-bored" d="M-14 31 Q 2 28 18 33" stroke="#1a0f33" stroke-width="4.5" stroke-linecap="round" fill="none" />
+            <circle class="gum" cx="27" cy="33" r="9" fill="#ff8cc0" />
+            <ellipse class="m m-curious" cx="3" cy="32" rx="6.5" ry="8" fill="#1a0f33" />
+            <g class="m m-delighted">
+              <path d="M-20 23 Q 2 54 24 23 Z" fill="#1a0f33" />
+              <path d="M-9 34 Q 2 29 13 34 Q 2 41 -9 34 Z" fill="#ff5c8a" />
+            </g>
+            <g class="m m-disgusted">
+              <path d="M-18 31 q 4.5 -6 9 0 t 9 0 t 9 0 t 9 0" stroke="#1a0f33" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+              <path d="M5 32 q 7 0 8 7 q -1 8 -8 7 q -6 -1 -5 -8 z" fill="#ff5c8a" />
+            </g>
+
+            <rect x="-77" y="-19" width="18" height="40" rx="8" fill="#1c1b29" />
+            <rect x="59" y="-19" width="18" height="40" rx="8" fill="#1c1b29" />
+            <circle class="led" cx="68" cy="1" r="3.2" fill="#2ee6d6" />
+          </g></g>
+        </g>
+
+        <g fill="#ff2d75">
+          <g transform="translate(212 34)"><path class="mh mh1" d="M0 3 C -6 -3 -11 2 -5 7 L 0 11 L 5 7 C 11 2 6 -3 0 3 Z" /></g>
+          <g transform="translate(232 58) scale(.75)"><path class="mh mh2" d="M0 3 C -6 -3 -11 2 -5 7 L 0 11 L 5 7 C 11 2 6 -3 0 3 Z" /></g>
+          <g transform="translate(90 26) scale(.85)"><path class="mh mh3" d="M0 3 C -6 -3 -11 2 -5 7 L 0 11 L 5 7 C 11 2 6 -3 0 3 Z" /></g>
+        </g>
+      </svg>
+    </section>
+
+    <div class="bubble" id="bubble">
+      <div class="bubble-label">The algorithm wants</div>
+      <div class="req" id="reqText">Something. Anything.</div>
+      <div class="sub" id="subText">Waiting for content…</div>
+      <div class="reqbar"><i id="reqBar"></i></div>
+    </div>
+
+    <div class="hud">
+      <div class="meter-wrap">
+        <div class="hud-label"><span>Attention</span><span class="drain" id="drainBadge">×2.5 drain</span></div>
+        <div class="meter" id="meter"><i id="meterFill"></i></div>
+      </div>
+      <div class="score">
+        <div class="hud-label">Watch time</div>
+        <div class="score-val" id="watch">0.0s</div>
+      </div>
+    </div>
+
+    <section class="feed">
+      <div class="post" id="post">
+        <canvas id="avatar"></canvas>
+        <div class="post-top">
+          <span class="chip"><b class="pfp">Y</b>@you</span>
+          <span class="tag">For You</span>
+        </div>
+        <div class="rail">
+          <div class="rail-item">
+            <div class="like-wrap" id="likeWrap">
+              <div class="ring" id="likeRing"></div>
+              <svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.8 4.5c2.1 0 3.6 1.1 5.2 3 1.6-1.9 3.1-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z" /></svg>
+            </div>
+            <span id="likeCount">0</span>
+          </div>
+          <div class="rail-item">
+            <svg viewBox="0 0 24 24" fill="#fff"><path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.3 1.1 4.4 2.9 5.9L4 21l4.3-2.2c1.2.4 2.4.6 3.7.6 5.5 0 10-3.8 10-8.4S17.5 3 12 3z" /></svg>
+            <span id="commentCount">0</span>
+          </div>
+          <div class="rail-item">
+            <svg viewBox="0 0 24 24" fill="#fff"><path d="M14 4v4C7 9 4 14 3 20c2.5-3.5 6-5.1 11-5.1V19l7-7.5L14 4z" /></svg>
+            <span>Share</span>
+          </div>
+        </div>
+        <div class="caption"><b>@you</b> <span id="caption">pls watch me 🥺 #fyp</span><div class="sound">♫ original sound · your webcam</div></div>
+        <div class="nosignal" id="noSignal"><div><div class="ghost-body"></div><b>The algorithm can't see you.</b><span>Step back so your head, shoulders and hands are in frame.</span></div></div>
+        <div class="stamp" id="stamp">Nah.</div>
+        <div class="bigheart" id="bigHeart"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.8 4.5c2.1 0 3.6 1.1 5.2 3 1.6-1.9 3.1-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z" /></svg></div>
+        <div class="hearts" id="hearts"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- start -->
+  <div class="overlay" id="startScreen">
+    <div class="brand"><span class="logo">▶</span>The Feed Scrolls You</div>
+    <h1>You are the <span class="grad">content</span> now.</h1>
+    <p class="lede">An AI algorithm is slumped on a beanbag with its thumb on the next button. Do what it asks. Stay interesting. The moment you're boring, it swipes.</p>
+    <ul class="rules">
+      <li><span><b>60 seconds</b> live. One viewer.</span></li>
+      <li><span>Its attention drains <b>constantly</b>.</span></li>
+      <li><span>Repeat yourself and it gets bored <b>faster</b>.</span></li>
+    </ul>
+    <button class="cta" id="goLive"><span class="rec"></span><span id="goLiveLabel">Go live</span></button>
+    <div class="status" id="loadStatus">Loading the algorithm…</div>
+    <div class="error hidden" id="errorBox" role="alert">
+      <b id="errTitle"></b>
+      <p id="errMsg"></p>
+      <button class="ghost" id="retry">Try again</button>
+    </div>
+    <div class="fine">Runs entirely in your browser. Your video never leaves this device.</div>
+  </div>
+
+  <!-- countdown -->
+  <div class="overlay hidden" id="countdown">
+    <div class="count" id="countNum">3</div>
+    <div class="count-sub" id="countSub">Get your upper body in frame</div>
+  </div>
+
+  <!-- end -->
+  <div class="overlay hidden" id="endScreen">
+    <div>
+      <div class="kicker">Your analytics</div>
+      <div class="end-title" id="endTitle">Session over.</div>
+    </div>
+    <div class="big-stat"><b id="endWatch">0.0s</b><small>total watch time the algorithm gave you</small></div>
+    <div class="stat-grid">
+      <div class="bad"><b id="endSwipes">0</b><span>times it swiped you away</span></div>
+      <div class="good"><b id="endLikes">0</b><span>times it liked you</span></div>
+    </div>
+    <div class="best"><span class="lbl">Best-performing request</span><b id="endBest">—</b><small id="endBestMeta"></small></div>
+    <div class="verdict"><span class="lbl">The algorithm now thinks you are:</span><b id="endLabel">—</b><small id="endQuip"></small></div>
+    <button class="cta" id="again"><span class="rec"></span>Go live again</button>
+  </div>
+</main>
+
+<video id="video" playsinline muted></video>
+<aside class="debug hidden" id="debug">
+  <div class="hdr"><span>debug</span><span id="dbgFps">0 fps</span></div>
+  <canvas id="dbgCanvas" width="280" height="210"></canvas>
+  <pre id="dbgText"></pre>
+</aside>
+<div class="hint">Press <kbd>D</kbd> for debug view</div>
+
+<script type="module">
+// =====================================================================
+//  CONFIG — every tunable threshold lives here. Press D in-game to see
+//  the live values these are compared against.
+//  Units: "sw" = shoulder widths (distance-independent). Face widths are
+//  fractions of the video frame width. Blendshapes are 0..1.
+// =====================================================================
+const CONFIG = {
+  sessionSec: 60,
+  countdownSec: 3,
+  requestMaxSec: 10,          // each request lasts up to this long
+  visibility: 0.5,            // min pose-landmark visibility to trust a point
+
+  meter: {
+    start: 100,               // attention (%) at the start of each request
+    drainPerSec: 12,          // constant drain, % per second
+    refillPerSec: 34,         // refill while satisfied, scaled 50–100% by how strongly
+  },
+  likeHoldSec: 1.2,           // seconds of *strong* performance (cumulative) that earn a like
+  likeBonusSec: 2,            // bonus watch time per like ("it rewatched you")
+  transitionSec: { swipe: 1.5, like: 1.8, timeout: 1.2 },
+
+  novelty: {
+    windowSec: 3,             // compare against your poses from the last ~3 s
+    sampleEverySec: 0.1,
+    minHistorySec: 2,         // need this much history before judging
+    ignoreRecentSec: 0.5,     // skip the most recent samples (they're always similar)
+    minDistance: 0.12,        // mean pose-signature distance below this = "You did that already."
+    exitDistance: 0.17,       // ...and must rise above this to count as fresh again (hysteresis)
+    drainMultiplier: 2.5,
+    graceSec: 1.5,            // no repetition penalty in the first moments of a request
+  },
+
+  motion: {
+    landmarkSmoothingSec: 0.05, // light EMA on raw landmarks (kills jitter)
+    smoothingSec: 0.25,         // EMA on the movement signal
+    maxSpeed: 8,                // clamp per-landmark speed (sw/s) to ignore glitches
+  },
+  face: { smoothingSec: 0.08 },
+
+  // "Show me energy!": mean landmark speed (sw per second, i.e. per-frame movement normalised by frame time)
+  energy:    { min: 1.0, strong: 2.0, likeHoldSec: 1.5 },
+  // "Freeze.": movement below maxMotion for holdSec
+  freeze:    { maxMotion: 0.3, holdSec: 2.0 },
+  // "Jump for me.": hip (or shoulder) height rises `rise` sw above its baseline, then lands
+  jump:      { rise: 0.22, strong: 0.45, landFraction: 0.4, maxAirSec: 1.0, baselineSec: 0.8, refill: 35, jumpsForLike: 2 },
+  // "Hands up!": the lower wrist is `margin` sw above the nose; `strong` = arms really up
+  handsUp:   { margin: 0.05, strong: 0.7 },
+  // "Look surprised.": jawOpen AND browInnerUp blendshapes
+  surprised: { jawOpen: 0.3, browInnerUp: 0.3, strongJawOpen: 0.5, strongBrowInnerUp: 0.5 },
+  // "Smile for me.": mouthSmileLeft + mouthSmileRight (0..2)
+  smile:     { sum: 0.8, strong: 1.3 },
+  // "Get closer": face width (fraction of frame width); shoulders count as faceWidth*shoulderToFace
+  closer:    { faceWidth: 0.22, strongFaceWidth: 0.32, shoulderToFace: 0.4 },
+};
+
+const MODELS = {
+  vision: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs',
+  wasm:   'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
+  pose:   'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+  face:   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+};
+
+const LINES = {
+  swipe:   ['Nah.', 'Seen it.', 'Next.', 'Boring.', 'Is that it?'],
+  like:    ['Obsessed.', 'Okay, that slaps.', 'Saving this.', 'Rewatching. Twice.', 'Algorithmically approved.'],
+  timeout: ['Meh. Moving on.', 'Fine. Next.', 'I\'ll allow it. Barely.'],
+  good:    ['Okay… go on.', 'Hm. Interesting.', 'I\'m watching.', 'Not terrible.', 'Keep going.'],
+  repeat:  'You did that already.',
+  absent:  'Where did you go? Get in frame.',
+};
+const CAPTIONS = [
+  'pls watch me 🥺 #fyp', 'day 1 of being content', 'no thoughts just landmarks', 'POV: you are the product',
+  'wait for it…', 'rate my pose 1–10', 'my villain era', 'engagement pls', 'not a bot (probably)', 'doing this for the algorithm',
+];
+
+// ---------------------------------------------------------------- helpers
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const ease = (dt, tau) => 1 - Math.exp(-dt / tau);
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, v: Math.min(a.v, b.v) });
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const level = (v, min, strong) => ({ satisfied: v >= min, strength: clamp((v - min) / (strong - min), 0, 1), strong: v >= strong });
+const HEART = '<svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.8 4.5c2.1 0 3.6 1.1 5.2 3 1.6-1.9 3.1-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z"/></svg>';
+
+// ---------------------------------------------------------------- requests
+// update(features, state, dt) -> { satisfied, strength 0..1, strong?, progress? (0..1 to a like), like?, bump?, remark? }
+const REQUESTS = [
+  {
+    id: 'energy', text: 'Show me energy!', hint: 'Move everything. Arms, legs, soul.',
+    adj: 'Chaotic.', tail: 'Slightly too much.', likeHoldSec: CONFIG.energy.likeHoldSec,
+    update: (f) => level(f.posePresent ? f.motion : 0, CONFIG.energy.min, CONFIG.energy.strong),
+  },
+  {
+    id: 'jump', text: 'Jump for me.', hint: 'Both feet. Off the ground.',
+    adj: 'Jumpy.', tail: 'Occasionally airborne.',
+    init: () => ({ count: 0, flash: 0, last: 0 }),
+    update(f, s, dt) {
+      s.flash = Math.max(0, s.flash - dt);
+      let bump = 0, like = false;
+      for (const peak of f.jumps) {
+        s.count++; s.flash = 0.7; s.last = clamp(peak / CONFIG.jump.strong, 0, 1);
+        bump += CONFIG.jump.refill;
+        if (peak >= CONFIG.jump.strong || s.count >= CONFIG.jump.jumpsForLike) like = true;
+      }
+      return { satisfied: s.flash > 0, strength: s.last, bump, like,
+               progress: Math.max(s.count / CONFIG.jump.jumpsForLike, 0),
+               remark: s.flash > 0 ? 'Again. Higher.' : null };
+    },
+  },
+  {
+    id: 'handsUp', text: 'Hands up!', hint: 'Both hands. Above your head.',
+    adj: 'Enthusiastic.', tail: 'Always raising a point.',
+    update(f) {
+      const r = level(f.posePresent ? f.handsUp : -9, CONFIG.handsUp.margin, CONFIG.handsUp.strong);
+      if (!r.satisfied && f.wristsUp === 1) r.remark = 'Both hands. BOTH.';
+      return r;
+    },
+  },
+  {
+    id: 'surprised', text: 'Look surprised.', hint: 'Jaw drop. Eyebrows up. Gasp.',
+    adj: 'Shookable.', tail: 'Mildly surprising.',
+    update(f) {
+      const c = CONFIG.surprised, jaw = f.bs.jawOpen, brow = f.bs.browInnerUp;
+      const jawOk = jaw >= c.jawOpen, browOk = brow >= c.browInnerUp;
+      const satisfied = f.facePresent && jawOk && browOk;
+      const strength = clamp(Math.min((jaw - c.jawOpen) / (c.strongJawOpen - c.jawOpen), (brow - c.browInnerUp) / (c.strongBrowInnerUp - c.browInnerUp)), 0, 1);
+      const r = { satisfied, strength: satisfied ? strength : 0, strong: satisfied && jaw >= c.strongJawOpen && brow >= c.strongBrowInnerUp };
+      if (f.facePresent && jawOk && !browOk) r.remark = 'Eyebrows too. UP.';
+      else if (f.facePresent && browOk && !jawOk) r.remark = 'Open your mouth. Gasp!';
+      return r;
+    },
+  },
+  {
+    id: 'smile', text: 'Smile for me.', hint: 'Big one. Teeth optional.',
+    adj: 'Wholesome.', tail: 'Suspiciously cheerful.',
+    update: (f) => level(f.facePresent ? f.bs.mouthSmileLeft + f.bs.mouthSmileRight : 0, CONFIG.smile.sum, CONFIG.smile.strong),
+  },
+  {
+    id: 'freeze', text: 'Freeze. Don\'t move.', hint: 'Statue mode. Two seconds.',
+    adj: 'Motionless.', tail: 'Possibly a screensaver.', noNovelty: true,
+    init: () => ({ still: 0, moved: 0 }),
+    update(f, s, dt) {
+      const still = f.posePresent && f.motion < CONFIG.freeze.maxMotion;
+      if (still) s.still += dt;
+      else { if (s.still > 0.4) s.moved = 1.2; s.still = 0; }
+      s.moved = Math.max(0, s.moved - dt);
+      const progress = s.still / CONFIG.freeze.holdSec;
+      return { satisfied: still, strength: clamp(progress, 0, 1), progress,
+               remark: s.moved > 0 ? 'You moved. Start over.' : still ? 'Hold it… hold it…' : null };
+    },
+  },
+  {
+    id: 'closer', text: 'Get closer to the screen.', hint: 'Closer. I want pores.',
+    adj: 'Clingy.', tail: 'Uncomfortably close.',
+    update(f) {
+      const v = Math.max(f.faceW, f.swFrac * CONFIG.closer.shoulderToFace);
+      return level(f.present ? v : 0, CONFIG.closer.faceWidth, CONFIG.closer.strongFaceWidth);
+    },
+  },
+];
+
+// ---------------------------------------------------------------- DOM
+const video = $('video'), algoSvg = $('algo'), post = $('post'), avatar = $('avatar');
+const actx = avatar.getContext('2d');
+const bubble = $('bubble'), reqText = $('reqText'), subText = $('subText');
+const meterEl = $('meter'), meterFill = $('meterFill'), drainBadge = $('drainBadge');
+const pupils = [...algoSvg.querySelectorAll('.pupil')];
+const startScreen = $('startScreen'), countdownEl = $('countdown'), endScreen = $('endScreen');
+const goLive = $('goLive'), goLiveLabel = $('goLiveLabel'), loadStatus = $('loadStatus');
+const debugEl = $('debug'), dbg = $('dbgCanvas'), dctx = dbg.getContext('2d');
+
+// ---------------------------------------------------------------- features (from MediaPipe)
+const F = {
+  present: false, posePresent: false, facePresent: false,
+  pts: null, sw: 0.25, swFrac: 0, aspect: 4 / 3,
+  motion: 0, handsUp: -9, wristsUp: 0, rise: 0,
+  jumpEvents: [], jumps: [],
+  faceW: 0, faceLms: null,
+  bs: { jawOpen: 0, browInnerUp: 0, mouthSmileLeft: 0, mouthSmileRight: 0, eyeBlinkLeft: 0, eyeBlinkRight: 0 },
+  noveltyDist: 1, repetitive: false, fps: 0,
+};
+const J = { state: 'ground', baseline: null, anchor: null, t: 0, peak: 0 };
+let poseLm = null, faceLm = null;
+let prevPts = null, lastVideoTime = -1, lastTs = 0, lastDetectT = 0, fpsN = 0, fpsT = 0;
+
+async function loadModels() {
+  loadStatus.className = 'status';
+  loadStatus.textContent = 'Loading the algorithm…';
+  const { FilesetResolver, PoseLandmarker, FaceLandmarker } = await import(MODELS.vision);
+  const fileset = await FilesetResolver.forVisionTasks(MODELS.wasm);
+  const make = async (Cls, opts) => {
+    try {
+      return await Cls.createFromOptions(fileset, { ...opts, baseOptions: { ...opts.baseOptions, delegate: 'GPU' } });
+    } catch (e) {
+      console.warn('GPU delegate unavailable, falling back to CPU', e);
+      return await Cls.createFromOptions(fileset, { ...opts, baseOptions: { ...opts.baseOptions, delegate: 'CPU' } });
+    }
+  };
+  poseLm = await make(PoseLandmarker, { baseOptions: { modelAssetPath: MODELS.pose }, runningMode: 'VIDEO', numPoses: 1 });
+  faceLm = await make(FaceLandmarker, { baseOptions: { modelAssetPath: MODELS.face }, runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true });
+  loadStatus.className = 'status ready';
+  loadStatus.textContent = 'Algorithm loaded. It\'s already bored.';
+}
+let modelsReady = loadModels();
+modelsReady.catch((e) => {
+  console.error(e);
+  loadStatus.textContent = 'The algorithm failed to load. Press Go live to retry.';
+});
+
+function detect() {
+  if (!poseLm || !faceLm || video.readyState < 2 || !video.videoWidth) return;
+  if (video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+  let ts = performance.now();
+  if (ts <= lastTs) ts = lastTs + 1;
+  lastTs = ts;
+  const t = ts / 1000;
+  const dt = clamp(lastDetectT ? t - lastDetectT : 1 / 30, 1 / 120, 0.25);
+  lastDetectT = t;
+  F.aspect = video.videoWidth / video.videoHeight;
+
+  let pr, fr;
+  try {
+    pr = poseLm.detectForVideo(video, ts);
+    fr = faceLm.detectForVideo(video, ts);
+  } catch (e) { console.warn(e); return; }
+
+  processPose(pr?.landmarks?.[0], dt);
+  processFace(fr, dt);
+  F.present = F.posePresent || F.facePresent;
+  updateNovelty(t);
+
+  fpsN++;
+  if (t - fpsT >= 1) { F.fps = fpsN / (t - fpsT); fpsN = 0; fpsT = t; }
+}
+
+const MOTION_IDX = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+
+function processPose(lms, dt) {
+  const vis = CONFIG.visibility;
+  if (!lms) {
+    F.posePresent = false; F.pts = null; prevPts = null;
+    F.motion = lerp(F.motion, 0, ease(dt, 0.3));
+    F.handsUp = -9; F.wristsUp = 0; F.rise = 0; F.swFrac = 0;
+    J.state = 'ground'; J.baseline = null;
+    return;
+  }
+  F.posePresent = true;
+  // Mirror x (selfie view) and express it in video-height units so distances aren't squashed.
+  const raw = lms.map((p) => ({ x: (1 - p.x) * F.aspect, y: p.y, v: p.visibility ?? 1 }));
+  const a = ease(dt, CONFIG.motion.landmarkSmoothingSec);
+  const pts = prevPts ? raw.map((p, i) => ({ x: lerp(prevPts[i].x, p.x, a), y: lerp(prevPts[i].y, p.y, a), v: p.v })) : raw;
+  const sw = Math.max(0.03, dist(pts[11], pts[12]));
+
+  // movement: mean landmark speed in shoulder-widths / second
+  if (prevPts) {
+    let sum = 0, n = 0;
+    for (const i of MOTION_IDX) {
+      if (pts[i].v < vis || prevPts[i].v < vis) continue;
+      sum += Math.min(CONFIG.motion.maxSpeed, dist(pts[i], prevPts[i]) / dt / sw);
+      n++;
+    }
+    F.motion = lerp(F.motion, n ? sum / n : 0, ease(dt, CONFIG.motion.smoothingSec));
+  }
+  prevPts = pts;
+  F.pts = pts; F.sw = sw;
+  F.swFrac = Math.abs(lms[11].x - lms[12].x);
+
+  // hands up: how far the *lower* wrist is above the nose
+  const nose = pts[0], lw = pts[15], rw = pts[16];
+  F.wristsUp = (lw.v > vis && lw.y < nose.y) + (rw.v > vis && rw.y < nose.y);
+  F.handsUp = (lw.v > vis && rw.v > vis && nose.v > vis) ? (nose.y - Math.max(lw.y, rw.y)) / sw : -9;
+
+  // jump: anchor (hips, or shoulders when hips are out of frame) rises fast above a slow baseline, then lands
+  const hips = pts[23].v > vis && pts[24].v > vis;
+  const anchor = hips ? 'hips' : 'shoulders';
+  const y = hips ? (pts[23].y + pts[24].y) / 2 : (pts[11].y + pts[12].y) / 2;
+  if (J.baseline == null || J.anchor !== anchor) { J.baseline = y; J.anchor = anchor; J.state = 'ground'; }
+  const rise = (J.baseline - y) / sw;
+  F.rise = rise;
+  const jc = CONFIG.jump;
+  if (J.state === 'ground') {
+    J.baseline = lerp(J.baseline, y, ease(dt, jc.baselineSec));
+    if (rise > jc.rise) { J.state = 'air'; J.t = 0; J.peak = rise; }
+  } else {
+    J.t += dt;
+    J.peak = Math.max(J.peak, rise);
+    if (rise < jc.rise * jc.landFraction) { F.jumpEvents.push(J.peak); J.state = 'ground'; }
+    else if (J.t > jc.maxAirSec) { J.state = 'ground'; J.baseline = y; } // stood up / stepped back, not a jump
+  }
+}
+
+function processFace(fr, dt) {
+  const lm = fr?.faceLandmarks?.[0];
+  F.facePresent = !!lm;
+  F.faceLms = lm || null;
+  F.faceW = lm ? Math.abs(lm[454].x - lm[234].x) : 0;
+  const target = {};
+  const cats = fr?.faceBlendshapes?.[0]?.categories;
+  if (cats) for (const c of cats) target[c.categoryName] = c.score;
+  const a = ease(dt, CONFIG.face.smoothingSec);
+  for (const k in F.bs) F.bs[k] = lerp(F.bs[k], target[k] ?? 0, a);
+}
+
+// novelty: compact pose+expression signature, compared to the last few seconds
+const history = [];
+let lastSampleT = 0;
+function signature() {
+  const p = F.pts, sw = F.sw, c = mid(p[11], p[12]), v = [];
+  for (const i of [0, 13, 14, 15, 16]) v.push((p[i].x - c.x) / sw, (p[i].y - c.y) / sw);
+  v.push(F.rise, F.bs.jawOpen * 2, F.bs.mouthSmileLeft + F.bs.mouthSmileRight, F.bs.browInnerUp * 2, Math.log(sw) * 2);
+  return v;
+}
+function rms(a, b) { let s = 0; for (let i = 0; i < a.length; i++) s += (a[i] - b[i]) ** 2; return Math.sqrt(s / a.length); }
+function updateNovelty(t) {
+  const c = CONFIG.novelty;
+  if (!F.pts) { history.length = 0; F.repetitive = false; F.noveltyDist = 1; return; }
+  const cur = signature();
+  if (t - lastSampleT >= c.sampleEverySec) { lastSampleT = t; history.push({ t, v: cur }); }
+  while (history.length && t - history[0].t > c.windowSec) history.shift();
+  const old = history.filter((h) => t - h.t >= c.ignoreRecentSec);
+  if (!history.length || t - history[0].t < c.minHistorySec || !old.length) { F.repetitive = false; F.noveltyDist = 1; return; }
+  let s = 0;
+  for (const h of old) s += rms(cur, h.v);
+  F.noveltyDist = s / old.length;
+  F.repetitive = F.repetitive ? F.noveltyDist < c.exitDistance : F.noveltyDist < c.minDistance;
+}
+
+// ---------------------------------------------------------------- camera
+let stream = null;
+async function startCamera() {
+  if (stream && stream.active) return;
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    const err = new Error('insecure'); err.name = 'InsecureContext'; throw err;
+  }
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false,
+  });
+  video.srcObject = stream;
+  await video.play();
+  if (video.readyState < 2) await new Promise((r) => video.addEventListener('loadeddata', r, { once: true }));
+  stream.getVideoTracks()[0]?.addEventListener('ended', () => {
+    stream = null;
+    G.phase = 'idle'; G.trans = null; G.req = null;
+    endScreen.classList.add('hidden');
+    showError({ title: 'Camera disconnected', msg: 'The camera stopped sending video. Reconnect it and press Try again.' });
+  });
+}
+function cameraError(e) {
+  switch (e?.name) {
+    case 'InsecureContext':
+      return { title: 'Open this page from localhost', msg: 'Browsers only allow the camera on secure pages. In this folder run <code>python3 -m http.server</code> and open <code>http://localhost:8000</code>.' };
+    case 'NotAllowedError': case 'SecurityError': case 'PermissionDeniedError':
+      return { title: 'Camera access was blocked', msg: 'The algorithm can\'t watch you without a camera. Click the camera icon in the address bar (or your browser\'s site settings), allow camera access, then press Try again.' };
+    case 'NotFoundError': case 'DevicesNotFoundError': case 'OverconstrainedError':
+      return { title: 'No camera found', msg: 'Plug in a webcam (or open the laptop lid), then press Try again.' };
+    case 'NotReadableError': case 'TrackStartError': case 'AbortError':
+      return { title: 'Your camera is busy', msg: 'Another app (Zoom, Meet, OBS, another tab…) is probably using it. Close that, then press Try again.' };
+    default:
+      return { title: 'The camera wouldn\'t start', msg: `Something went wrong: ${e?.message || e}. Try again, or try another browser.` };
+  }
+}
+function showError({ title, msg }) {
+  $('errTitle').textContent = title;
+  $('errMsg').innerHTML = msg;
+  $('errorBox').classList.remove('hidden');
+  startScreen.classList.remove('hidden');
+  countdownEl.classList.add('hidden');
+}
+function hideError() { $('errorBox').classList.add('hidden'); }
+
+// ---------------------------------------------------------------- game state
+const G = {
+  phase: 'idle', clock: 0, countdown: 0, sessionLeft: CONFIG.sessionSec,
+  meter: 100, watch: 0, swipes: 0, likes: 0,
+  req: null, trans: null, recent: [], stats: {},
+  status: '', statusAt: -9, mood: 'bored', moodAt: -9, moodOverride: null,
+  satisfied: false, repetitive: false, postHue: 285, lookX: 0,
+};
+
+function setMood(m, force = false) {
+  if (m === G.mood) return;
+  if (!force && G.clock - G.moodAt < 0.45) return;
+  G.mood = m; G.moodAt = G.clock;
+  algoSvg.dataset.mood = m;
+}
+function overrideMood(m, sec) { G.moodOverride = { m, until: G.clock + sec }; setMood(m, true); }
+
+function setBubble(text, kind = '') {
+  reqText.textContent = text;
+  bubble.classList.remove('pop', 'snark', 'love');
+  void bubble.offsetWidth;
+  bubble.classList.add('pop');
+  if (kind) bubble.classList.add(kind);
+}
+function setSub(text) {
+  if (subText.textContent === text) return;
+  subText.textContent = text;
+  subText.classList.remove('flash'); void subText.offsetWidth; subText.classList.add('flash');
+}
+
+function beginSession() {
+  Object.assign(G, {
+    phase: 'countdown', countdown: CONFIG.countdownSec, sessionLeft: CONFIG.sessionSec,
+    meter: CONFIG.meter.start, watch: 0, swipes: 0, likes: 0, req: null, trans: null, recent: [],
+    stats: Object.fromEntries(REQUESTS.map((r) => [r.id, { shown: 0, likes: 0, swipes: 0, good: 0 }])),
+    status: '', moodOverride: null, satisfied: false, repetitive: false,
+  });
+  hideError();
+  startScreen.classList.add('hidden');
+  endScreen.classList.add('hidden');
+  countdownEl.classList.remove('hidden');
+  $('likeWrap').classList.remove('liked');
+  newPost();
+  setMood('bored', true);
+  setBubble('Ugh. Fine. Entertain me.');
+  setSub('Going live…');
+  lastCount = -1;
+}
+
+let lastCount = -1;
+function updateCountdown(dt) {
+  G.countdown -= dt;
+  const n = Math.max(1, Math.ceil(G.countdown));
+  if (n !== lastCount) {
+    lastCount = n;
+    const el = $('countNum');
+    el.textContent = n;
+    el.classList.remove('tick'); void el.offsetWidth; el.classList.add('tick');
+  }
+  const sub = $('countSub');
+  sub.textContent = F.present ? 'It sees you. Look alive.' : 'Step back. Get your upper body in frame.';
+  sub.classList.toggle('ok', F.present);
+  if (G.countdown <= 0) {
+    G.phase = 'live';
+    countdownEl.classList.add('hidden');
+    startRequest();
+  }
+}
+
+function startRequest() {
+  const pool = REQUESTS.filter((r) => !G.recent.includes(r.id));
+  const def = pick(pool);
+  G.recent.push(def.id);
+  if (G.recent.length > 2) G.recent.shift();
+  G.req = { def, t: 0, s: def.init ? def.init() : {}, strongTime: 0, progress: 0 };
+  G.meter = CONFIG.meter.start;
+  G.stats[def.id].shown++;
+  G.status = ''; G.statusAt = -9;
+  F.jumpEvents.length = 0;
+  setBubble(def.text);
+  setSub(def.hint);
+  overrideMood('curious', 0.8);
+}
+
+function updateGame(dt) {
+  G.sessionLeft -= dt;
+  if (G.sessionLeft <= 0) { G.sessionLeft = 0; endSession(); return; }
+  F.jumps = F.jumpEvents.splice(0);
+
+  if (G.trans) {
+    G.trans.t += dt;
+    if (G.trans.t >= G.trans.dur) { G.trans = null; startRequest(); }
+    G.satisfied = false; G.repetitive = false;
+    return;
+  }
+
+  const R = G.req;
+  R.t += dt;
+  const res = R.def.update(F, R.s, dt);
+  const repetitive = F.present && F.repetitive && !R.def.noNovelty && R.t > CONFIG.novelty.graceSec;
+  G.satisfied = res.satisfied; G.repetitive = repetitive;
+
+  const drain = CONFIG.meter.drainPerSec * (repetitive ? CONFIG.novelty.drainMultiplier : 1);
+  const gain = res.satisfied ? CONFIG.meter.refillPerSec * (0.5 + 0.5 * res.strength) : 0;
+  G.meter = clamp(G.meter + (gain - drain) * dt + (res.bump || 0), 0, 100);
+  G.watch += dt;
+  if (res.satisfied) G.stats[R.def.id].good += dt;
+
+  if (res.progress != null) R.progress = res.progress;
+  else {
+    R.strongTime = res.strong ? R.strongTime + dt : Math.max(0, R.strongTime - dt * 0.5);
+    R.progress = R.strongTime / (R.def.likeHoldSec ?? CONFIG.likeHoldSec);
+  }
+
+  if (res.like || R.progress >= 1) return like();
+  if (G.meter <= 0) return swipe();
+  if (R.t >= CONFIG.requestMaxSec) return timeout();
+
+  // what the algorithm mutters
+  let status, line;
+  if (!F.present) { status = 'absent'; line = LINES.absent; }
+  else if (res.remark) { status = 'r:' + res.remark; line = res.remark; }
+  else if (repetitive) { status = 'repeat'; line = LINES.repeat; }
+  else if (res.satisfied) { status = 'good'; line = null; }
+  else { status = 'idle'; line = R.def.hint; }
+  if (status !== G.status && G.clock - G.statusAt > 0.6) {
+    G.status = status; G.statusAt = G.clock;
+    setSub(line ?? pick(LINES.good));
+  }
+
+  // mood
+  if (G.moodOverride && G.clock < G.moodOverride.until) return;
+  G.moodOverride = null;
+  let mood = 'bored';
+  if (res.satisfied) mood = 'curious';
+  else if (G.meter < 28) mood = 'disgusted';
+  if (repetitive && !res.satisfied) mood = 'bored';
+  setMood(mood);
+}
+
+function like() {
+  const id = G.req.def.id;
+  G.likes++; G.stats[id].likes++;
+  G.watch += CONFIG.likeBonusSec;
+  G.trans = { kind: 'like', t: 0, dur: CONFIG.transitionSec.like };
+  G.satisfied = false;
+  overrideMood('delighted', CONFIG.transitionSec.like);
+  setBubble(pick(LINES.like), 'love');
+  setSub(`+${CONFIG.likeBonusSec}s rewatch bonus`);
+  heartBurst();
+  setTimeout(slidePost, 950);
+}
+
+function swipe() {
+  G.swipes++; G.stats[G.req.def.id].swipes++;
+  G.trans = { kind: 'swipe', t: 0, dur: CONFIG.transitionSec.swipe };
+  const line = pick(LINES.swipe);
+  overrideMood('disgusted', CONFIG.transitionSec.swipe);
+  setBubble(line, 'snark');
+  setSub('*swipes*');
+  const stamp = $('stamp');
+  stamp.textContent = line;
+  stamp.classList.remove('show'); void stamp.offsetWidth; stamp.classList.add('show');
+  algoSvg.classList.remove('swiping'); void algoSvg.getBoundingClientRect(); algoSvg.classList.add('swiping');
+  setTimeout(() => algoSvg.classList.remove('swiping'), 750);
+  setTimeout(slidePost, 480);
+}
+
+function timeout() {
+  G.trans = { kind: 'timeout', t: 0, dur: CONFIG.transitionSec.timeout };
+  overrideMood('bored', CONFIG.transitionSec.timeout);
+  setBubble(pick(LINES.timeout));
+  setSub('Time\'s up.');
+  algoSvg.classList.remove('swiping'); void algoSvg.getBoundingClientRect(); algoSvg.classList.add('swiping');
+  setTimeout(() => algoSvg.classList.remove('swiping'), 750);
+  setTimeout(slidePost, 250);
+}
+
+function endSession() {
+  G.phase = 'ended'; G.trans = null; G.req = null; G.satisfied = false; G.repetitive = false;
+  G.moodOverride = null;
+  setMood('bored', true);
+  setBubble('Okay, that\'s enough of you.');
+  setSub('Session over. Scrolling to a cat video.');
+  fillAnalytics();
+  countdownEl.classList.add('hidden');
+  endScreen.classList.remove('hidden');
+  endScreen.scrollTop = 0;
+}
+
+function fillAnalytics() {
+  const ranked = REQUESTS
+    .map((r) => { const s = G.stats[r.id]; return { r, s, perf: s.likes * 4 + s.good - s.swipes * 1.5 }; })
+    .filter((x) => x.s.shown > 0)
+    .sort((a, b) => b.perf - a.perf);
+  const best = ranked[0]?.perf > 0 ? ranked[0] : null;
+  const second = ranked[1]?.perf > 0 ? ranked[1] : null;
+
+  $('endWatch').textContent = G.watch.toFixed(1) + 's';
+  $('endSwipes').textContent = G.swipes;
+  $('endLikes').textContent = G.likes;
+  $('endTitle').textContent = G.likes > G.swipes ? 'You went viral. Briefly.' : G.likes ? 'Mixed engagement.' : 'Thoroughly scrolled.';
+  if (best) {
+    $('endBest').textContent = `“${best.r.text}”`;
+    const l = best.s.likes;
+    $('endBestMeta').textContent = `${l} like${l === 1 ? '' : 's'} · ${best.s.good.toFixed(1)}s actually delivering`;
+    $('endLabel').textContent = `${best.r.adj} ${second ? second.r.tail : best.r.tail}`;
+  } else {
+    $('endBest').textContent = 'None. Ouch.';
+    $('endBestMeta').textContent = 'Nothing you did held its attention.';
+    $('endLabel').textContent = 'Unwatchable. Pure static.';
+  }
+  const quips = G.likes >= 4 ? 'Expect to see more of yourself. Everywhere.'
+    : G.swipes > G.likes ? 'You\'ll now be shown only to people who fell asleep.'
+    : 'You have been added to 3 niche content clusters.';
+  $('endQuip').textContent = quips;
+}
+
+// ---------------------------------------------------------------- post (the user as content)
+let slideAnim = null;
+function newPost() {
+  G.postHue = (G.postHue + 80 + Math.random() * 120) % 360;
+  $('caption').textContent = pick(CAPTIONS);
+  $('stamp').classList.remove('show');
+  particles.length = 0;
+}
+async function slidePost() {
+  const out = post.animate(
+    [{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(-104%)', opacity: 0.5 }],
+    { duration: 380, easing: 'cubic-bezier(.6,0,.85,.35)', fill: 'forwards' });
+  await out.finished.catch(() => {});
+  newPost();
+  slideAnim?.cancel();
+  slideAnim = post.animate(
+    [{ transform: 'translateY(104%)', opacity: 1 }, { transform: 'translateY(0)', opacity: 1 }],
+    { duration: 520, easing: 'cubic-bezier(.16,.9,.25,1)' });
+  out.cancel();
+}
+
+function heartBurst() {
+  const big = $('bigHeart');
+  big.classList.remove('pop'); void big.offsetWidth; big.classList.add('pop');
+  const lw = $('likeWrap');
+  lw.classList.remove('liked'); void lw.offsetWidth; lw.classList.add('liked');
+  const box = $('hearts');
+  for (let i = 0; i < 16; i++) {
+    const h = document.createElement('span');
+    h.className = 'fh';
+    h.innerHTML = HEART;
+    h.style.left = `${38 + Math.random() * 24}%`;
+    h.style.setProperty('--dx', `${(Math.random() - 0.5) * 70}cqw`);
+    h.style.setProperty('--dy', `${-20 - Math.random() * 40}cqh`);
+    h.style.setProperty('--s', (0.6 + Math.random() * 1.1).toFixed(2));
+    h.style.setProperty('--r', `${(Math.random() - 0.5) * 80}deg`);
+    h.style.setProperty('--c', pick(['#ff2d75', '#ff6aa2', '#b06cff', '#ff9ec4']));
+    h.style.animationDelay = `${Math.random() * 0.25}s`;
+    h.addEventListener('animationend', () => h.remove());
+    box.appendChild(h);
+  }
+}
+
+// avatar canvas -------------------------------------------------------
+let dpr = Math.min(2, window.devicePixelRatio || 1);
+new ResizeObserver(() => {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  avatar.width = Math.round(post.clientWidth * dpr);
+  avatar.height = Math.round(post.clientHeight * dpr);
+  if (!looping) drawAvatar(0);
+}).observe(post);
+
+const cam = { x: 0, y: 0, k: 0, init: false };
+const particles = [];
+let emitAcc = 0;
+const LIMBS_LEGS = [[23, 25], [25, 27], [24, 26], [26, 28]];
+const LIMBS_ARMS = [[11, 13], [13, 15], [12, 14], [14, 16]];
+
+function blob(ctx, x, y, r, color) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+}
+
+function drawAvatar(dt) {
+  const W = avatar.width, H = avatar.height, ctx = actx, t = G.clock, hue = G.postHue;
+  if (!W || !H) return;
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = `hsl(${hue} 45% 8%)`;
+  ctx.fillRect(0, 0, W, H);
+  blob(ctx, W * (0.28 + 0.14 * Math.sin(t * 0.4)), H * (0.3 + 0.1 * Math.cos(t * 0.33)), W * 0.95, `hsla(${hue}, 90%, 55%, .38)`);
+  blob(ctx, W * (0.78 + 0.1 * Math.cos(t * 0.5)), H * (0.76 + 0.08 * Math.sin(t * 0.27)), W * 0.95, `hsla(${hue + 60}, 90%, 55%, .3)`);
+  const vg = ctx.createLinearGradient(0, H * 0.6, 0, H);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.55)');
+  ctx.fillStyle = vg; ctx.fillRect(0, H * 0.6, W, H * 0.4);
+
+  $('noSignal').classList.toggle('show', !F.pts && G.phase !== 'idle' && G.phase !== 'ended');
+  post.classList.toggle('hot', G.satisfied && G.phase === 'live');
+
+  if (F.pts) {
+    const p = F.pts, sw = F.sw, sh = mid(p[11], p[12]);
+    const kT = clamp((0.36 * W) / sw, 0.75 * H, 2.4 * H);
+    if (!cam.init) Object.assign(cam, { x: sh.x, y: sh.y, k: kT, init: true });
+    cam.k = lerp(cam.k, kT, ease(dt, 0.9));
+    cam.x = lerp(cam.x, sh.x, ease(dt, 0.5));
+    cam.y = lerp(cam.y, sh.y, ease(dt, 1.2));
+    const X = (q) => (q.x - cam.x) * cam.k + W / 2;
+    const Y = (q) => (q.y - cam.y) * cam.k + H * 0.42;
+    const ok = (...ids) => ids.every((i) => p[i].v > 0.35);
+    const lw = sw * cam.k * 0.24;
+    const c1 = `hsl(${hue + 20} 100% 72%)`, c2 = `hsl(${hue + 85} 100% 66%)`;
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, c1); grad.addColorStop(1, c2);
+
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.shadowColor = `hsla(${hue + 40}, 100%, 65%, .85)`;
+    ctx.shadowBlur = lw * 0.9;
+    ctx.strokeStyle = grad; ctx.fillStyle = grad;
+    const bone = (a, b, w = lw) => { ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(X(p[a]), Y(p[a])); ctx.lineTo(X(p[b]), Y(p[b])); ctx.stroke(); };
+
+    for (const [a, b] of LIMBS_LEGS) if (ok(a, b)) bone(a, b);
+    // torso
+    ctx.globalAlpha = 0.92;
+    ctx.beginPath();
+    if (ok(23, 24)) {
+      ctx.moveTo(X(p[11]), Y(p[11])); ctx.lineTo(X(p[12]), Y(p[12]));
+      ctx.lineTo(X(p[24]), Y(p[24])); ctx.lineTo(X(p[23]), Y(p[23]));
+    } else {
+      const spread = sw * cam.k * 0.12;
+      ctx.moveTo(X(p[11]), Y(p[11])); ctx.lineTo(X(p[12]), Y(p[12]));
+      ctx.lineTo(X(p[12]) + Math.sign(X(p[12]) - X(p[11])) * spread, H + lw);
+      ctx.lineTo(X(p[11]) - Math.sign(X(p[12]) - X(p[11])) * spread, H + lw);
+    }
+    ctx.closePath();
+    ctx.lineWidth = lw * 0.9; ctx.fill(); ctx.stroke();
+    ctx.globalAlpha = 1;
+    for (const [a, b] of LIMBS_ARMS) if (ok(a, b)) bone(a, b);
+    for (const i of [15, 16]) if (ok(i)) { ctx.beginPath(); ctx.arc(X(p[i]), Y(p[i]), lw * 0.78, 0, Math.PI * 2); ctx.fill(); }
+
+    // head
+    const earsOk = ok(7, 8);
+    const hc = earsOk ? mid(p[7], p[8]) : p[0];
+    const r = Math.max(earsOk ? dist(p[7], p[8]) * 0.68 : sw * 0.34, sw * 0.26) * cam.k;
+    let ang = 0;
+    if (ok(2, 5)) {
+      ang = Math.atan2(p[2].y - p[5].y, p[2].x - p[5].x);
+      if (ang > Math.PI / 2) ang -= Math.PI;
+      if (ang < -Math.PI / 2) ang += Math.PI;
+    }
+    const yaw = earsOk ? clamp((p[0].x - hc.x) / (dist(p[7], p[8]) / 2 + 1e-6), -1, 1) : 0;
+    const hx = X(hc), hy = Y(hc) - r * 0.12;
+    G.lookX = clamp((hx / W - 0.5) * 2, -1, 1);
+    // neck
+    ctx.lineWidth = lw * 0.85;
+    ctx.beginPath(); ctx.moveTo(X(sh), Y(sh)); ctx.lineTo(hx, hy + r * 0.6); ctx.stroke();
+
+    ctx.save();
+    ctx.translate(hx, hy); ctx.rotate(ang);
+    const hg = ctx.createRadialGradient(-r * 0.3, -r * 0.4, r * 0.1, 0, 0, r * 1.1);
+    hg.addColorStop(0, `hsl(${hue + 30} 100% 88%)`); hg.addColorStop(1, `hsl(${hue + 60} 95% 66%)`);
+    ctx.fillStyle = hg;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    const bs = F.bs, fx = yaw * r * 0.28, ink = `hsl(${hue + 250} 60% 12%)`;
+    const smile = (bs.mouthSmileLeft + bs.mouthSmileRight) / 2, jaw = bs.jawOpen, brow = bs.browInnerUp;
+    // eyes
+    for (const [side, blink] of [[-1, bs.eyeBlinkLeft], [1, bs.eyeBlinkRight]]) {
+      const ex = fx + side * r * 0.36, ey = -r * 0.08;
+      const ry = r * 0.17 * (1 - clamp(blink, 0, 1) * 0.9);
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.ellipse(ex, ey, r * 0.13, Math.max(ry, r * 0.02), 0, 0, Math.PI * 2); ctx.fill();
+      if (ry > r * 0.05) {
+        ctx.fillStyle = ink;
+        ctx.beginPath(); ctx.arc(ex + yaw * r * 0.04, ey + r * 0.02, r * 0.07, 0, Math.PI * 2); ctx.fill();
+      }
+      // brows
+      ctx.strokeStyle = ink; ctx.lineWidth = r * 0.07;
+      const by = -r * 0.36 - brow * r * 0.2;
+      ctx.beginPath(); ctx.moveTo(ex - r * 0.12, by + side * brow * r * 0.03); ctx.lineTo(ex + r * 0.12, by - side * brow * r * 0.03); ctx.stroke();
+    }
+    // mouth
+    const my = r * 0.4, mw = r * (0.26 + 0.2 * smile), cy = my - smile * r * 0.12;
+    ctx.fillStyle = ink; ctx.strokeStyle = ink; ctx.lineWidth = r * 0.06;
+    ctx.beginPath();
+    ctx.moveTo(fx - mw, cy);
+    ctx.quadraticCurveTo(fx, my + smile * r * 0.06 - jaw * r * 0.14, fx + mw, cy);
+    ctx.quadraticCurveTo(fx, my + smile * r * 0.3 + jaw * r * 0.62 + r * 0.02, fx - mw, cy);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    if (smile > 0.35) {
+      ctx.fillStyle = 'rgba(255, 90, 160, .35)';
+      for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(fx + s * r * 0.58, r * 0.2, r * 0.13, r * 0.08, 0, 0, Math.PI * 2); ctx.fill(); }
+    }
+    ctx.restore();
+
+    // sparkles while you're delivering
+    if (G.satisfied && G.phase === 'live' && !G.trans) {
+      emitAcc += dt * 45;
+      while (emitAcc > 1 && particles.length < 220) {
+        emitAcc--;
+        const src = p[pick([0, 15, 16, 11, 12])];
+        particles.push({ x: X(src), y: Y(src), vx: (Math.random() - 0.5) * W * 0.4, vy: -H * (0.05 + Math.random() * 0.25), life: 1, size: (1.5 + Math.random() * 3.5) * dpr, hue: hue + Math.random() * 90 });
+      }
+    }
+  } else {
+    cam.init = false;
+  }
+
+  ctx.shadowBlur = 0;
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const q = particles[i];
+    q.x += q.vx * dt; q.y += q.vy * dt; q.vy += H * 0.08 * dt; q.life -= dt * 1.3;
+    if (q.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.globalAlpha = q.life;
+    ctx.fillStyle = `hsl(${q.hue} 100% 75%)`;
+    ctx.beginPath(); ctx.arc(q.x, q.y, q.size, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------------------------------------------------------------- HUD
+const setText = (el, v) => { v = String(v); if (el._v !== v) { el._v = v; el.textContent = v; } };
+const fmt = (s) => { const n = Math.ceil(s); return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`; };
+let lastLook = '';
+function renderHUD() {
+  const m = G.meter / 100;
+  meterFill.style.transform = `scaleX(${m})`;
+  meterEl.style.setProperty('--hue', Math.round(m * 130));
+  meterEl.classList.toggle('low', G.phase === 'live' && !G.trans && m < 0.3);
+  meterEl.classList.toggle('fast', G.repetitive);
+  drainBadge.textContent = `×${CONFIG.novelty.drainMultiplier} drain`;
+  drainBadge.classList.toggle('show', G.repetitive);
+  setText($('watch'), G.watch.toFixed(1) + 's');
+  setText($('timer'), fmt(Math.max(0, G.sessionLeft)));
+  $('sessionBar').style.transform = `scaleX(${G.phase === 'idle' ? 0 : 1 - G.sessionLeft / CONFIG.sessionSec})`;
+  const live = G.phase === 'live' && G.req && !G.trans;
+  $('reqBar').style.transform = `scaleX(${live ? 1 - G.req.t / CONFIG.requestMaxSec : 0})`;
+  $('likeRing').style.setProperty('--p', live ? clamp(G.req.progress, 0, 1).toFixed(3) : 0);
+  setText($('likeCount'), G.likes);
+  setText($('commentCount'), Math.floor(G.watch * 1.7));
+  algoSvg.classList.toggle('impatient', live && G.meter < 35);
+  const look = `translate(${(G.lookX * 3.5).toFixed(1)} 3)`;
+  if (look !== lastLook) { lastLook = look; for (const el of pupils) el.setAttribute('transform', look); }
+}
+
+// ---------------------------------------------------------------- debug view (D)
+let debugOn = false;
+const DBG_BONES = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28], [0, 2], [0, 5], [2, 7], [5, 8]];
+function drawDebug() {
+  if (!video.videoWidth) return;
+  const w = 280, h = Math.round(w / F.aspect);
+  if (dbg.height !== h) dbg.height = h;
+  dctx.save(); dctx.translate(w, 0); dctx.scale(-1, 1); dctx.drawImage(video, 0, 0, w, h); dctx.restore();
+  if (F.pts) {
+    const S = (q) => [(q.x / F.aspect) * w, q.y * h];
+    dctx.strokeStyle = '#2ee6d6'; dctx.lineWidth = 2;
+    for (const [a, b] of DBG_BONES) {
+      if (F.pts[a].v < CONFIG.visibility || F.pts[b].v < CONFIG.visibility) continue;
+      dctx.beginPath(); dctx.moveTo(...S(F.pts[a])); dctx.lineTo(...S(F.pts[b])); dctx.stroke();
+    }
+    for (const q of F.pts) {
+      dctx.fillStyle = q.v > CONFIG.visibility ? '#ff2d75' : 'rgba(255,255,255,.3)';
+      const [x, y] = S(q); dctx.fillRect(x - 2, y - 2, 4, 4);
+    }
+    if (J.baseline != null) {
+      dctx.strokeStyle = J.state === 'air' ? '#b6f35a' : 'rgba(182,243,90,.5)';
+      dctx.setLineDash([4, 4]);
+      dctx.beginPath(); dctx.moveTo(0, J.baseline * h); dctx.lineTo(w, J.baseline * h); dctx.stroke();
+      dctx.setLineDash([]);
+    }
+  }
+  if (F.faceLms) {
+    dctx.fillStyle = 'rgba(255,216,77,.7)';
+    for (let i = 0; i < F.faceLms.length; i += 7) { const q = F.faceLms[i]; dctx.fillRect((1 - q.x) * w - 1, q.y * h - 1, 2, 2); }
+    dctx.fillStyle = '#ffd84d';
+    for (const i of [234, 454]) { const q = F.faceLms[i]; dctx.beginPath(); dctx.arc((1 - q.x) * w, q.y * h, 3, 0, Math.PI * 2); dctx.fill(); }
+  }
+  const b = F.bs, f2 = (v) => v.toFixed(2);
+  $('dbgFps').textContent = `${F.fps.toFixed(0)} fps`;
+  $('dbgText').textContent = [
+    `pose ${F.posePresent ? 'yes' : 'no '}  face ${F.facePresent ? 'yes' : 'no'}`,
+    `motion     ${f2(F.motion)}  (energy ≥${CONFIG.energy.min}, freeze <${CONFIG.freeze.maxMotion})`,
+    `jump rise  ${f2(F.rise)}  ${J.state}/${J.anchor ?? '-'}  (≥${CONFIG.jump.rise})`,
+    `handsUp    ${F.handsUp < -8 ? '—' : f2(F.handsUp)}  (≥${CONFIG.handsUp.margin})`,
+    `jaw/brow   ${f2(b.jawOpen)} / ${f2(b.browInnerUp)}  (≥${CONFIG.surprised.jawOpen}/${CONFIG.surprised.browInnerUp})`,
+    `smile sum  ${f2(b.mouthSmileLeft + b.mouthSmileRight)}  (≥${CONFIG.smile.sum})`,
+    `faceW      ${f2(F.faceW)}  shoulderW ${f2(F.swFrac)}  (≥${CONFIG.closer.faceWidth})`,
+    `novelty    ${f2(F.noveltyDist)}  ${F.repetitive ? 'REPETITIVE' : 'fresh'}  (<${CONFIG.novelty.minDistance})`,
+    `request    ${G.req?.def.id ?? '-'}  meter ${G.meter.toFixed(0)}  like ${G.req ? f2(G.req.progress) : '-'}`,
+  ].join('\n');
+}
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'd' || e.key === 'D') {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    debugOn = !debugOn;
+    debugEl.classList.toggle('hidden', !debugOn);
+  }
+});
+
+// ---------------------------------------------------------------- main loop
+let looping = false, lastFrame = 0;
+function frame(now) {
+  const dt = Math.min(0.1, (now - lastFrame) / 1000);
+  lastFrame = now;
+  G.clock += dt;
+  detect();
+  if (G.phase === 'countdown') updateCountdown(dt);
+  else if (G.phase === 'live') updateGame(dt);
+  else F.jumpEvents.length = 0;
+  drawAvatar(dt);
+  renderHUD();
+  if (debugOn) drawDebug();
+  requestAnimationFrame(frame);
+}
+function startLoop() {
+  if (looping) return;
+  looping = true;
+  lastFrame = performance.now();
+  requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------- buttons
+async function onGoLive() {
+  hideError();
+  goLive.disabled = true;
+  goLiveLabel.textContent = 'Asking for your camera…';
+  try {
+    await startCamera();
+  } catch (e) {
+    console.error(e);
+    showError(cameraError(e));
+    goLive.disabled = false; goLiveLabel.textContent = 'Go live';
+    return;
+  }
+  try {
+    goLiveLabel.textContent = 'Waking the algorithm…';
+    await modelsReady;
+  } catch (e) {
+    console.error(e);
+    showError({ title: 'The algorithm failed to load', msg: `The AI models load from cdn.jsdelivr.net and storage.googleapis.com. Check your connection or ad-blocker, then press Try again. <br><small>${e?.message || e}</small>` });
+    modelsReady = loadModels();
+    modelsReady.catch(() => {});
+    goLive.disabled = false; goLiveLabel.textContent = 'Go live';
+    return;
+  }
+  goLive.disabled = false; goLiveLabel.textContent = 'Go live';
+  startLoop();
+  beginSession();
+}
+goLive.addEventListener('click', onGoLive);
+$('retry').addEventListener('click', onGoLive);
+$('again').addEventListener('click', onGoLive);
+
+// idle frame so the post isn't blank behind the start screen
+newPost();
+drawAvatar(0);
+renderHUD();
+</script>
+</body>
+</html>
